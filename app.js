@@ -43,7 +43,7 @@ async function loadZXing(){
   if(window.ZXing?.BrowserMultiFormatReader) return true;
   return await new Promise(resolve=>{
     const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js';
+    s.src='https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js?janfix=20260921';
     s.async=true;
     s.onload=()=>resolve(!!window.ZXing?.BrowserMultiFormatReader);
     s.onerror=()=>resolve(false);
@@ -59,29 +59,72 @@ function cameraErrorMessage(e){
   if(n==='AbortError') return 'カメラの起動が中断されました。もう一度お試しください。';
   return `カメラ起動エラー: ${n||'Unknown'}${m?` / ${m}`:''}`;
 }
+function normalizeJan(text){
+  const digits=String(text??'').replace(/[^0-9]/g,'');
+  // JAN-13 / JAN-8を優先。UPC-Aは先頭0を付けるとJAN-13相当になる。
+  if(digits.length===13 || digits.length===8) return digits;
+  if(digits.length===12) return '0'+digits;
+  return digits;
+}
+function validJan(text){
+  const j=normalizeJan(text);
+  if(!/^\d{8}$|^\d{13}$/.test(j)) return false;
+  let sum=0;
+  for(let i=0;i<j.length-1;i++) sum += Number(j[i]) * ((j.length-i-1)%2===0 ? 3 : 1);
+  return (10-(sum%10))%10===Number(j[j.length-1]);
+}
+function makeZXingReader(){
+  const hints=new Map();
+  if(window.ZXing?.DecodeHintType && window.ZXing?.BarcodeFormat){
+    hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,[
+      window.ZXing.BarcodeFormat.EAN_13,
+      window.ZXing.BarcodeFormat.EAN_8,
+      window.ZXing.BarcodeFormat.UPC_A,
+      window.ZXing.BarcodeFormat.UPC_E
+    ]);
+    hints.set(window.ZXing.DecodeHintType.TRY_HARDER,true);
+  }
+  return new window.ZXing.BrowserMultiFormatReader(hints,300);
+}
 async function startCamera(){
   stopCamera();
   $('cameraHelp').classList.add('hidden');
+  $('janResult').classList.add('hidden');
   $('scanMsg').textContent='カメラを起動しています…';
   $('cameraDiag').textContent='';
   try{
     if(!window.isSecureContext) throw Object.assign(new Error('HTTPS'),{name:'SecurityError'});
     if(!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('getUserMedia unavailable'),{name:'NotSupportedError'});
-    // 最初にカメラだけを取得。バーコードライブラリは後から読み込む。
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false});
+    // 先に権限を確認して映像を表示する。ここまでは前回と同じだが、読み取りは専用設定で行う。
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
     $('video').srcObject=stream;
     await $('video').play();
-    $('scanMsg').textContent='カメラ起動OK。バーコードを枠に合わせてください';
-    $('cameraDiag').textContent='カメラは正常に起動しました。';
+    $('scanMsg').textContent='カメラ起動OK。JANコードを枠に合わせてください';
+    $('cameraDiag').textContent='JAN-13 / JAN-8 / UPCを読み取り中…';
 
     const ok=await loadZXing();
     if(!ok){
       $('cameraDiag').textContent='カメラは起動しましたが、JAN読み取り機能の読み込みに失敗しました。';
       return;
     }
-    reader=new ZXing.BrowserMultiFormatReader();
-    reader.decodeFromVideoElement($('video'),(result)=>{
-      if(result){currentJan=result.getText();stopCamera();lookup();}
+    reader=makeZXingReader();
+    let last=''; let lastAt=0;
+    reader.decodeFromVideoElement($('video'),(result,err)=>{
+      if(result){
+        const raw=result.getText?.()||result.text||'';
+        const jan=normalizeJan(raw);
+        const now=Date.now();
+        if(jan && (validJan(jan) || (jan.length===8||jan.length===13)) && (jan!==last || now-lastAt>1500)){
+          last=jan; lastAt=now;
+          $('scanMsg').textContent='JANコードを読み取りました';
+          $('cameraDiag').innerHTML=`<strong>JAN：${esc(jan)}</strong>`;
+          currentJan=jan;
+          $('janResultValue').textContent=jan;
+          $('janResult').classList.remove('hidden');
+          stopCamera();
+        }
+      }
+      // errは連続スキャン中の一時的な「まだ見つからない」ことが多いので画面には出さない。
     });
   }catch(e){
     stopCamera();
@@ -92,6 +135,8 @@ async function startCamera(){
     $('cameraHelp').classList.remove('hidden');
   }
 }
+$('useJanBtn').onclick=()=>{if(currentJan){lookup()}};
+$('rescanBtn').onclick=()=>startCamera();
 $('cameraRetry').onclick=()=>startCamera();
 $('cameraClose').onclick=()=>{$('cameraHelp').classList.add('hidden')};
 $('photoScanBtn').onclick=()=>$('photoInput').click();
@@ -104,11 +149,11 @@ $('photoInput').addEventListener('change',async e=>{
     const url=URL.createObjectURL(file);
     const img=new Image(); img.onload=async()=>{
       try{
-        const r=new ZXing.BrowserMultiFormatReader();
+        const r=makeZXingReader();
         const result=await r.decodeFromImageElement(img);
         const text=result?.getText?.()||result?.text;
         if(!text) throw new Error('JANコードを検出できませんでした。');
-        currentJan=text; lookup();
+        currentJan=normalizeJan(text); $('scanMsg').textContent='JANコードを読み取りました'; $('cameraDiag').innerHTML=`<strong>JAN：${esc(currentJan)}</strong>`; $('janResultValue').textContent=currentJan; $('janResult').classList.remove('hidden');
       }catch(err){$('scanMsg').textContent=err.message||'JANコードを読み取れませんでした。';}
       finally{URL.revokeObjectURL(url)}
     }; img.src=url;
