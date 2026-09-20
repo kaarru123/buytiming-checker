@@ -37,7 +37,52 @@ $('useManual').onclick=()=>{const n=$('storeManual').value.trim();if(!n){toast('
 function renderData(){const ps=[...Object.values(state.products),...Object.values(state.customProducts)],rs=state.records;$('dataBody').innerHTML=`<div class="card"><h3>商品 ${ps.length}件</h3>${ps.length?ps.map(p=>`<div class="record"><div>${p.image?`<img class="thumb" src="${p.image}">`:''}<b>${esc(p.name)}</b><div class="muted">${esc(p.category||'JAN商品')}</div></div></div>`).join(''):'<div class="empty">登録商品なし</div>'}</div><div class="card"><h3>価格記録 ${rs.length}件</h3>${rs.length?[...rs].reverse().map(r=>`<div class="record"><div><b>${esc(r.name)}</b><div class="muted">${esc(r.store)}・${esc(r.date)}</div></div><div class="price">¥${Number(r.price).toLocaleString()}</div></div>`).join(''):'<div class="empty">価格記録なし</div>'}</div>`}
 $('addListBtn').onclick=addListItem;$('nonJanBtn').onclick=()=>show('janless');$('dataBtn').onclick=()=>show('data');$('manualBtn').onclick=()=>{const j=prompt('JANコードを入力してください');if(j){currentJan=j.trim();lookup()}};
 $('scanBtn').onclick=async()=>{show('scanner');startCamera()};$('stopBtn').onclick=()=>stopCamera();
-async function startCamera(){try{if(!window.isSecureContext||!navigator.mediaDevices?.getUserMedia)throw new Error('unsupported');if(!window.ZXing)throw new Error('zxing');reader=new ZXing.BrowserMultiFormatReader();stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});$('video').srcObject=stream;await $('video').play();$('scanMsg').textContent='バーコードを枠に合わせてください';reader.decodeFromVideoElement($('video'),(result)=>{if(result){currentJan=result.getText();stopCamera();lookup()}})}catch(e){$('scanMsg').textContent='カメラを起動できませんでした。';$('cameraHelpText').textContent=!window.isSecureContext?'HTTPSで開いてください。GitHub Pagesなら通常は対応しています。':'Safariのカメラ許可を確認してください。';$('cameraHelp').classList.remove('hidden')}}
+async function loadZXing(){
+  if(window.ZXing) return true;
+  return await new Promise(resolve=>{
+    const s=document.createElement('script');
+    s.src='https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js';
+    s.onload=()=>resolve(!!window.ZXing);
+    s.onerror=()=>resolve(false);
+    document.head.appendChild(s);
+  });
+}
+async function startCamera(){
+  stopCamera();
+  $('scanMsg').textContent='カメラを起動しています…';
+  try{
+    if(!window.isSecureContext) throw new Error('https');
+    if(!navigator.mediaDevices?.getUserMedia) throw new Error('unsupported');
+    // 先にカメラを取得して映像を表示する。バーコードライブラリの読み込み失敗でカメラまで止めない。
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
+    $('video').srcObject=stream;
+    await $('video').play();
+    $('scanMsg').textContent='バーコードを枠に合わせてください';
+
+    const zxingReady=await loadZXing();
+    if(!zxingReady){
+      $('scanMsg').textContent='カメラは起動しました。バーコード読み取り機能を読み込めませんでした。';
+      $('cameraHelpText').textContent='カメラは正常に起動しています。通信状態を確認して、もう一度お試しください。JANコードは「JANコードを入力」から手入力もできます。';
+      $('cameraHelp').classList.remove('hidden');
+      return;
+    }
+    reader=new ZXing.BrowserMultiFormatReader();
+    reader.decodeFromVideoElement($('video'),(result)=>{
+      if(result){
+        currentJan=result.getText();
+        stopCamera();
+        lookup();
+      }
+    });
+  }catch(e){
+    stopCamera();
+    $('scanMsg').textContent='カメラを起動できませんでした。';
+    if(e?.message==='https') $('cameraHelpText').textContent='HTTPSで開いてください。GitHub Pagesなら通常は対応しています。';
+    else if(e?.message==='unsupported') $('cameraHelpText').textContent='この画面ではカメラ機能を利用できません。iPhoneのSafariでページを開いてお試しください。';
+    else $('cameraHelpText').textContent='Safariのカメラ許可が「許可」になっていることを確認してください。許可済みの場合は「もう一度試す」を押してください。';
+    $('cameraHelp').classList.remove('hidden');
+  }
+}
 function stopCamera(){if(reader){try{reader.reset()}catch(e){}reader=null}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
 $('cameraRetry').onclick=()=>{$('cameraHelp').classList.add('hidden');startCamera()};$('cameraClose').onclick=()=>{$('cameraHelp').classList.add('hidden')};$('installHelp').onclick=()=>alert('iPhoneのSafariで共有ボタン →「ホーム画面に追加」でアプリのように使えます。');document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show(b.dataset.back));$('clearData').onclick=()=>{if(confirm('商品・価格・買い物リストをすべて削除しますか？')){localStorage.removeItem(DBKEY);state={products:{},customProducts:{},records:[],shoppingList:[]};renderHome();toast('削除しました')}};
 load();renderHome();$('dateInput').value=today();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});
