@@ -35,7 +35,7 @@ function getLocation(){if(!navigator.geolocation){$('locMsg').textContent='位�
 async function findStores(lat,lon){$('stores').innerHTML="<div class='card'>近くのスーパーを検索中…</div>";try{const q=`[out:json][timeout:10];(nwr["shop"="supermarket"](around:5000,${lat},${lon});nwr["name"~"スーパー|マルナカ|ハローズ|天満屋|イオン|ゆめタウン|コープ|業務スーパー|ザグザグ|ドン・キホーテ"](around:5000,${lat},${lon}););out center 15;`;const res=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q});const data=await res.json();const arr=(data.elements||[]).filter(x=>x.tags?.name).map(x=>({name:x.tags.name,address:x.tags['addr:street']||x.tags['addr:city']||'',lat:x.lat??x.center?.lat,lon:x.lon??x.center?.lon})).slice(0,12);$('stores').innerHTML=arr.length?arr.map(s=>`<div class="store-item"><button data-store='${JSON.stringify(s).replace(/'/g,'&#39;')}'>🏪 <b>${esc(s.name)}</b><div class="muted">${esc(s.address)}</div></button></div>`).join(''):'<div class="card">近くの店舗が見つかりませんでした。</div>';$('stores').querySelectorAll('button').forEach(b=>b.onclick=()=>{currentStore=JSON.parse(b.dataset.store);$('storeText').textContent=currentStore.name;$('customStoreText').textContent=currentStore.name;show(storeReturn)})}catch(e){$('stores').innerHTML='<div class="card">店舗検索に失敗しました。下の入力欄から店舗名を入力してください。</div>'}}
 $('useManual').onclick=()=>{const n=$('storeManual').value.trim();if(!n){toast('店舗名を入力してください');return}currentStore={name:n};$('storeText').textContent=n;$('customStoreText').textContent=n;show(storeReturn)};
 function renderData(){const ps=[...Object.values(state.products),...Object.values(state.customProducts)],rs=state.records;$('dataBody').innerHTML=`<div class="card"><h3>商品 ${ps.length}件</h3>${ps.length?ps.map(p=>`<div class="record"><div>${p.image?`<img class="thumb" src="${p.image}">`:''}<b>${esc(p.name)}</b><div class="muted">${esc(p.category||'JAN商品')}</div></div></div>`).join(''):'<div class="empty">登録商品なし</div>'}</div><div class="card"><h3>価格記録 ${rs.length}件</h3>${rs.length?[...rs].reverse().map(r=>`<div class="record"><div><b>${esc(r.name)}</b><div class="muted">${esc(r.store)}・${esc(r.date)}</div></div><div class="price">¥${Number(r.price).toLocaleString()}</div></div>`).join(''):'<div class="empty">価格記録なし</div>'}</div>`}
-$('addListBtn').onclick=addListItem;$('nonJanBtn').onclick=()=>show('janless');$('dataBtn').onclick=()=>show('data');$('manualBtn').onclick=()=>{const j=prompt('JANコードを入力してください');if(j){currentJan=j.trim();lookup()}};
+$('addListBtn').onclick=addListItem;$('nonJanBtn').onclick=()=>show('janless');$('dataBtn').onclick=()=>show('data');$('manualBtn').onclick=()=>{const j=prompt('商品バーコード番号を入力してください');if(j){currentJan=j.trim();lookup()}};
 $('scanBtn').onclick=()=>{show('scanner');setTimeout(startCamera,80)};
 $('stopBtn')?.addEventListener('click',()=>stopCamera());
 
@@ -94,7 +94,7 @@ function showScanSuccess(jan){
   $('scanSuccess').classList.remove('hidden');
   $('cameraCard').classList.add('scan-success-active');
   if(navigator.vibrate) try{navigator.vibrate([45,35,90])}catch(e){}
-  toast('JANコードを読み取りました');
+  toast('商品バーコードを読み取りました');
   setTimeout(()=>{$('janResult').classList.remove('hidden');},220);
   setTimeout(()=>stopCamera(),500);
 }
@@ -154,7 +154,7 @@ async function startCamera(){
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
     $('video').srcObject=stream;
     await $('video').play();
-    $('scanMsg').textContent='JANコードにカメラを向けてください';
+    $('scanMsg').textContent='商品バーコードにカメラを向けてください';
     $('cameraDiag').textContent='自動読み取り中…写真撮影は不要です。';
 
     // Safari等でBarcodeDetectorが使える場合はネイティブ検出を優先。
