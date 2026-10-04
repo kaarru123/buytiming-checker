@@ -1,5 +1,5 @@
 const DBKEY="buytiming_v5_1";
-let state={products:{},customProducts:{},records:[],shoppingList:[]};let currentJan=null,currentProduct=null,currentCustom=null,currentStore=null,stream=null,reader=null,currentCustomCategory="";
+let state={products:{},customProducts:{},records:[],shoppingList:[]};let currentJan=null,currentProduct=null,currentCustom=null,currentStore=null,stream=null,reader=null,currentCustomCategory="";let scanTimer=null,scanRunning=false,scanAttempts=0,scanHits=new Map();
 const $=id=>document.getElementById(id); const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 function load(){try{const x=JSON.parse(localStorage.getItem(DBKEY));if(x)state={products:{},customProducts:{},records:[],shoppingList:[],...x}}catch(e){}} function save(){localStorage.setItem(DBKEY,JSON.stringify(state));renderHome()}
 function today(){return new Date().toISOString().slice(0,10)}
@@ -80,15 +80,66 @@ function makeZXingReader(){
       window.ZXing.BarcodeFormat.UPC_A,
       window.ZXing.BarcodeFormat.UPC_E
     ]);
-    hints.set(window.ZXing.DecodeHintType.TRY_HARDER,true);
-    hints.set(window.ZXing.DecodeHintType.ASSUME_GS1,true);
+    // iPhone SafariではTRY_HARDERが逆に不安定になる既知の報告があるため、今回は使わない。
   }
-  return new window.ZXing.BrowserMultiFormatReader(hints,120);
+  const Reader=window.ZXing?.BrowserMultiFormatOneDReader||window.ZXing?.BrowserMultiFormatReader;
+  if(!Reader) throw new Error('ZXing OneD reader unavailable');
+  // 120msごとに解析。失敗時も連続して再試行し、成功後は画面側で確定する。
+  return new Reader(hints,{delayBetweenScanAttempts:120,delayBetweenScanSuccess:800,tryPlayVideoTimeout:5000});
+}
+function scanCanvasFromVideo(video, crop){
+  const vw=video.videoWidth||1280, vh=video.videoHeight||720;
+  const canvas=scanCanvasFromVideo.canvas||(scanCanvasFromVideo.canvas=document.createElement('canvas'));
+  let sx=0,sy=0,sw=vw,sh=vh;
+  if(crop){
+    sw=Math.floor(vw*0.82); sh=Math.floor(vh*0.48);
+    sx=Math.floor((vw-sw)/2); sy=Math.floor((vh-sh)/2);
+  }
+  const maxW=crop?1200:1440;
+  const scale=Math.min(1,maxW/sw);
+  canvas.width=Math.max(320,Math.floor(sw*scale));
+  canvas.height=Math.max(180,Math.floor(sh*scale));
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(video,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
+  return canvas;
+}
+function resetScanCandidates(){scanHits.clear();scanAttempts=0}
+function registerScanHit(raw){
+  const jan=normalizeJan(raw);
+  if(!/^\d{8}$|^\d{13}$/.test(jan)) return false;
+  const now=Date.now();
+  for(const [k,v] of scanHits){if(now-v.last>1800)scanHits.delete(k)}
+  const v=scanHits.get(jan)||{count:0,last:0};
+  v.count++;v.last=now;scanHits.set(jan,v);
+  $('cameraDiag').textContent=`自動読み取り中… 試行 ${scanAttempts}回 ・ 候補 ${jan}（${v.count}/2）`;
+  if(v.count>=2){showScanSuccess(jan);return true}
+  return false;
+}
+function startBarcodeLoop(video){
+  scanRunning=true; resetScanCandidates();
+  const run=()=>{
+    if(!scanRunning||!stream||video.readyState<2){if(scanRunning)scanTimer=setTimeout(run,150);return}
+    scanAttempts++;
+    let found=false;
+    try{
+      // 中央の読み取り領域を優先。4回に1回は全画面も解析して端のバーコードを拾う。
+      const crop=(scanAttempts%4)!==0;
+      const canvas=scanCanvasFromVideo(video,crop);
+      const result=reader.decodeFromCanvas(canvas);
+      if(result){const raw=result.getText?.()||result.text||'';found=registerScanHit(raw)}
+    }catch(e){
+      // NotFound / Checksum / Format は通常の「まだ見つからない」なので無視して再試行。
+    }
+    if(scanRunning&&!found) scanTimer=setTimeout(run,120);
+  };
+  run();
 }
 function showScanSuccess(jan){
   currentJan=jan;
+  scanRunning=false;
+  if(scanTimer){clearTimeout(scanTimer);scanTimer=null}
   $('scanMsg').textContent='読み取り完了';
-  $('cameraDiag').innerHTML=`<strong>JAN：${esc(jan)}</strong>`;
+  $('cameraDiag').innerHTML=`<strong>バーコードを認識しました</strong> ・ ${esc(jan)}`;
   $('janResultValue').textContent=jan;
   $('scanSuccessValue').textContent=jan;
   $('scanSuccess').classList.remove('hidden');
@@ -96,49 +147,14 @@ function showScanSuccess(jan){
   if(navigator.vibrate) try{navigator.vibrate([45,35,90])}catch(e){}
   toast('商品バーコードを読み取りました');
   setTimeout(()=>{$('janResult').classList.remove('hidden');},220);
-  setTimeout(()=>stopCamera(),500);
+  setTimeout(()=>stopCamera(),650);
 }
-function acceptDecoded(raw){
-  const jan=normalizeJan(raw);
-  if(!/^\d{8}$|^\d{13}$/.test(jan)) return false;
-  // 正規のJANはチェックデジットも確認。読み取り機がUPC等を返す場合は桁数だけで受け付ける。
-  if(jan.length===8 || jan.length===13){
-    showScanSuccess(jan); return true;
-  }
-  return false;
-}
+function acceptDecoded(raw){return registerScanHit(raw)}
 
 async function startNativeDetector(video){
-  if(!('BarcodeDetector' in window)) return false;
-  let detector;
-  try{
-    const formats=['ean_13','ean_8','upc_a','upc_e'];
-    if(BarcodeDetector.getSupportedFormats){
-      const supported=await BarcodeDetector.getSupportedFormats();
-      const use=formats.filter(f=>supported.includes(f));
-      if(!use.length) return false;
-      detector=new BarcodeDetector({formats:use});
-    }else detector=new BarcodeDetector({formats});
-  }catch(e){return false}
-  let running=true, busy=false;
-  window.__nativeScanStop=()=>{running=false};
-  const loop=async()=>{
-    if(!running || !video.srcObject) return;
-    if(!busy && video.readyState>=2 && !video.paused){
-      busy=true;
-      try{
-        const codes=await detector.detect(video);
-        for(const c of codes||[]){
-          const raw=c.rawValue||c.value||'';
-          if(acceptDecoded(raw)){running=false;break;}
-        }
-      }catch(e){}
-      busy=false;
-    }
-    if(running) requestAnimationFrame(loop);
-  };
-  requestAnimationFrame(loop);
-  return true;
+  // BarcodeDetectorが使える端末でも、今回はZXingの同一canvasループを優先する。
+  // Safari間の実装差による二重解析を避けるため無効化。
+  return false;
 }
 async function startCamera(){
   stopCamera();
@@ -151,58 +167,25 @@ async function startCamera(){
   try{
     if(!window.isSecureContext) throw Object.assign(new Error('HTTPS'),{name:'SecurityError'});
     if(!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('getUserMedia unavailable'),{name:'NotSupportedError'});
-
-    // カメラはこの1回だけ取得する。読み取り側で別ストリームを作らない。
-    stream=await navigator.mediaDevices.getUserMedia({
-      video:{
-        facingMode:{ideal:'environment'},
-        width:{ideal:1920},
-        height:{ideal:1080}
-      },
-      audio:false
-    });
-
-    const video=$('video');
-    video.srcObject=stream;
-    video.setAttribute('playsinline','');
-    video.muted=true;
-    await video.play();
-
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
+    const video=$('video');video.srcObject=stream;video.setAttribute('playsinline','');video.muted=true;await video.play();
     $('scanMsg').textContent='商品バーコードを枠に合わせてください';
-    $('cameraDiag').textContent='自動読み取り中…写真撮影は不要です。';
-
-    // ZXingを読み込む。重要：既に起動しているvideo要素そのものを解析する。
+    $('cameraDiag').textContent='自動読み取り中… 写真撮影は不要です。';
     const ok=await loadZXing();
-    if(!ok){
-      $('cameraDiag').textContent='カメラは起動しましたが、バーコード読み取り機能を読み込めませんでした。Safariでページを再読み込みして再試行してください。';
-      return;
-    }
-
+    if(!ok){$('cameraDiag').textContent='カメラは起動しましたが、バーコード読み取り機能を読み込めませんでした。Safariでページを再読み込みして再試行してください。';return}
     reader=makeZXingReader();
-
-    // 追加のgetUserMedia/decodeFromConstraintsは使わない。
-    // 現在表示しているvideoストリームをそのままZXingに渡す。
-    reader.decodeFromVideoElement(video,(result,err)=>{
-      if(result){
-        const raw=result.getText?.()||result.text||'';
-        if(acceptDecoded(raw)){
-          $('cameraDiag').textContent='バーコードを認識しました。';
-        }
-      }
-    });
+    startBarcodeLoop(video);
   }catch(e){
     stopCamera();
     const msg=cameraErrorMessage(e);
     $('scanMsg').textContent='カメラを起動できませんでした';
-    $('cameraDiag').textContent=msg;
-    $('cameraHelpText').textContent=msg;
-    $('cameraHelp').classList.remove('hidden');
+    $('cameraDiag').textContent=msg;$('cameraHelpText').textContent=msg;$('cameraHelp').classList.remove('hidden');
   }
 }
 $('useJanBtn').onclick=()=>{if(currentJan){lookup()}};
 $('rescanBtn').onclick=()=>startCamera();
 $('cameraRetry').onclick=()=>startCamera();
 $('cameraClose').onclick=()=>{$('cameraHelp').classList.add('hidden')};
-function stopCamera(){if(window.__nativeScanStop){try{window.__nativeScanStop()}catch(e){}window.__nativeScanStop=null}if(reader){try{reader.reset()}catch(e){}reader=null}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
+function stopCamera(){scanRunning=false;if(scanTimer){clearTimeout(scanTimer);scanTimer=null}resetScanCandidates();if(window.__nativeScanStop){try{window.__nativeScanStop()}catch(e){}window.__nativeScanStop=null}if(reader){try{reader.reset()}catch(e){}reader=null}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
 $('installHelp').onclick=()=>alert('iPhoneのSafariで共有ボタン →「ホーム画面に追加」でアプリのように使えます。');document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show(b.dataset.back));$('clearData').onclick=()=>{if(confirm('商品・価格・買い物リストをすべて削除しますか？')){localStorage.removeItem(DBKEY);state={products:{},customProducts:{},records:[],shoppingList:[]};renderHome();toast('削除しました')}};
 load();renderHome();$('dateInput').value=today();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
