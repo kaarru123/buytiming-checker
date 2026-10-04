@@ -1,4 +1,4 @@
-const CACHE='buytiming-v5-1-camera-v3';
+const CACHE='buytiming-v5-1-jan-auto-v1';
 self.addEventListener('install',e=>self.skipWaiting());
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{

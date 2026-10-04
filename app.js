@@ -37,13 +37,13 @@ $('useManual').onclick=()=>{const n=$('storeManual').value.trim();if(!n){toast('
 function renderData(){const ps=[...Object.values(state.products),...Object.values(state.customProducts)],rs=state.records;$('dataBody').innerHTML=`<div class="card"><h3>商品 ${ps.length}件</h3>${ps.length?ps.map(p=>`<div class="record"><div>${p.image?`<img class="thumb" src="${p.image}">`:''}<b>${esc(p.name)}</b><div class="muted">${esc(p.category||'JAN商品')}</div></div></div>`).join(''):'<div class="empty">登録商品なし</div>'}</div><div class="card"><h3>価格記録 ${rs.length}件</h3>${rs.length?[...rs].reverse().map(r=>`<div class="record"><div><b>${esc(r.name)}</b><div class="muted">${esc(r.store)}・${esc(r.date)}</div></div><div class="price">¥${Number(r.price).toLocaleString()}</div></div>`).join(''):'<div class="empty">価格記録なし</div>'}</div>`}
 $('addListBtn').onclick=addListItem;$('nonJanBtn').onclick=()=>show('janless');$('dataBtn').onclick=()=>show('data');$('manualBtn').onclick=()=>{const j=prompt('JANコードを入力してください');if(j){currentJan=j.trim();lookup()}};
 $('scanBtn').onclick=()=>{show('scanner');setTimeout(startCamera,80)};
-$('stopBtn').onclick=()=>stopCamera();
+$('stopBtn')?.addEventListener('click',()=>stopCamera());
 
 async function loadZXing(){
   if(window.ZXing?.BrowserMultiFormatReader) return true;
   return await new Promise(resolve=>{
     const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js?janfix=20260921';
+    s.src='https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js?janfix=20261002';
     s.async=true;
     s.onload=()=>resolve(!!window.ZXing?.BrowserMultiFormatReader);
     s.onerror=()=>resolve(false);
@@ -56,12 +56,10 @@ function cameraErrorMessage(e){
   if(n==='NotFoundError') return '利用できるカメラが見つかりませんでした。';
   if(n==='NotReadableError'||n==='TrackStartError') return 'カメラを他のアプリや機能が使用中の可能性があります。カメラを閉じてから再試行してください。';
   if(n==='SecurityError') return 'このページではカメラを利用できません。SafariでHTTPSのページを開いてください。';
-  if(n==='AbortError') return 'カメラの起動が中断されました。もう一度お試しください。';
   return `カメラ起動エラー: ${n||'Unknown'}${m?` / ${m}`:''}`;
 }
 function normalizeJan(text){
   const digits=String(text??'').replace(/[^0-9]/g,'');
-  // JAN-13 / JAN-8を優先。UPC-Aは先頭0を付けるとJAN-13相当になる。
   if(digits.length===13 || digits.length===8) return digits;
   if(digits.length===12) return '0'+digits;
   return digits;
@@ -83,55 +81,105 @@ function makeZXingReader(){
       window.ZXing.BarcodeFormat.UPC_E
     ]);
     hints.set(window.ZXing.DecodeHintType.TRY_HARDER,true);
+    hints.set(window.ZXing.DecodeHintType.ASSUME_GS1,true);
   }
-  return new window.ZXing.BrowserMultiFormatReader(hints,300);
+  return new window.ZXing.BrowserMultiFormatReader(hints,120);
+}
+function showScanSuccess(jan){
+  currentJan=jan;
+  $('scanMsg').textContent='読み取り完了';
+  $('cameraDiag').innerHTML=`<strong>JAN：${esc(jan)}</strong>`;
+  $('janResultValue').textContent=jan;
+  $('scanSuccessValue').textContent=jan;
+  $('scanSuccess').classList.remove('hidden');
+  $('cameraCard').classList.add('scan-success-active');
+  if(navigator.vibrate) try{navigator.vibrate([45,35,90])}catch(e){}
+  toast('JANコードを読み取りました');
+  setTimeout(()=>{$('janResult').classList.remove('hidden');},220);
+  setTimeout(()=>stopCamera(),500);
+}
+function acceptDecoded(raw){
+  const jan=normalizeJan(raw);
+  if(!/^\d{8}$|^\d{13}$/.test(jan)) return false;
+  // 正規のJANはチェックデジットも確認。読み取り機がUPC等を返す場合は桁数だけで受け付ける。
+  if(jan.length===8 || jan.length===13){
+    showScanSuccess(jan); return true;
+  }
+  return false;
+}
+
+async function startNativeDetector(video){
+  if(!('BarcodeDetector' in window)) return false;
+  let detector;
+  try{
+    const formats=['ean_13','ean_8','upc_a','upc_e'];
+    if(BarcodeDetector.getSupportedFormats){
+      const supported=await BarcodeDetector.getSupportedFormats();
+      const use=formats.filter(f=>supported.includes(f));
+      if(!use.length) return false;
+      detector=new BarcodeDetector({formats:use});
+    }else detector=new BarcodeDetector({formats});
+  }catch(e){return false}
+  let running=true, busy=false;
+  window.__nativeScanStop=()=>{running=false};
+  const loop=async()=>{
+    if(!running || !video.srcObject) return;
+    if(!busy && video.readyState>=2 && !video.paused){
+      busy=true;
+      try{
+        const codes=await detector.detect(video);
+        for(const c of codes||[]){
+          const raw=c.rawValue||c.value||'';
+          if(acceptDecoded(raw)){running=false;break;}
+        }
+      }catch(e){}
+      busy=false;
+    }
+    if(running) requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+  return true;
 }
 async function startCamera(){
   stopCamera();
   $('cameraHelp').classList.add('hidden');
   $('janResult').classList.add('hidden');
+  $('scanSuccess').classList.add('hidden');
+  $('cameraCard').classList.remove('scan-success-active');
   $('scanMsg').textContent='カメラを起動しています…';
   $('cameraDiag').textContent='';
   try{
     if(!window.isSecureContext) throw Object.assign(new Error('HTTPS'),{name:'SecurityError'});
     if(!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('getUserMedia unavailable'),{name:'NotSupportedError'});
-    // 先に権限を確認して映像を表示する。ここまでは前回と同じだが、読み取りは専用設定で行う。
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
     $('video').srcObject=stream;
     await $('video').play();
-    $('scanMsg').textContent='カメラ起動OK。JANコードを枠に合わせてください';
-    $('cameraDiag').textContent='JAN-13 / JAN-8 / UPCを読み取り中…';
+    $('scanMsg').textContent='JANコードにカメラを向けてください';
+    $('cameraDiag').textContent='自動読み取り中…写真撮影は不要です。';
 
+    // Safari等でBarcodeDetectorが使える場合はネイティブ検出を優先。
+    const nativeStarted=await startNativeDetector($('video'));
+    if(nativeStarted) return;
+
+    // フォールバック：ZXingをカメラ映像へ直接接続する。別途写真撮影は要求しない。
     const ok=await loadZXing();
     if(!ok){
-      $('cameraDiag').textContent='カメラは起動しましたが、JAN読み取り機能の読み込みに失敗しました。';
+      $('cameraDiag').textContent='カメラは起動しましたが、自動JAN読み取り機能を読み込めませんでした。ページを再読み込みして再試行してください。';
       return;
     }
     reader=makeZXingReader();
-    let last=''; let lastAt=0;
-    reader.decodeFromVideoElement($('video'),(result,err)=>{
+    reader.decodeFromConstraints({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}},$('video'),(result,err)=>{
       if(result){
         const raw=result.getText?.()||result.text||'';
-        const jan=normalizeJan(raw);
-        const now=Date.now();
-        if(jan && (validJan(jan) || (jan.length===8||jan.length===13)) && (jan!==last || now-lastAt>1500)){
-          last=jan; lastAt=now;
-          $('scanMsg').textContent='JANコードを読み取りました';
-          $('cameraDiag').innerHTML=`<strong>JAN：${esc(jan)}</strong>`;
-          currentJan=jan;
-          $('janResultValue').textContent=jan;
-          $('janResult').classList.remove('hidden');
-          stopCamera();
-        }
+        if(acceptDecoded(raw)) return;
       }
-      // errは連続スキャン中の一時的な「まだ見つからない」ことが多いので画面には出さない。
     });
   }catch(e){
     stopCamera();
     const msg=cameraErrorMessage(e);
     $('scanMsg').textContent='カメラを起動できませんでした';
     $('cameraDiag').textContent=msg;
-    $('cameraHelpText').textContent=msg+' 「カメラでJANを撮影して読み取る」も試せます。';
+    $('cameraHelpText').textContent=msg;
     $('cameraHelp').classList.remove('hidden');
   }
 }
@@ -139,27 +187,6 @@ $('useJanBtn').onclick=()=>{if(currentJan){lookup()}};
 $('rescanBtn').onclick=()=>startCamera();
 $('cameraRetry').onclick=()=>startCamera();
 $('cameraClose').onclick=()=>{$('cameraHelp').classList.add('hidden')};
-$('photoScanBtn').onclick=()=>$('photoInput').click();
-$('photoInput').addEventListener('change',async e=>{
-  const file=e.target.files?.[0]; if(!file)return;
-  $('scanMsg').textContent='写真からJANコードを読み取っています…';
-  try{
-    const ok=await loadZXing();
-    if(!ok) throw new Error('JAN読み取り機能を読み込めませんでした。');
-    const url=URL.createObjectURL(file);
-    const img=new Image(); img.onload=async()=>{
-      try{
-        const r=makeZXingReader();
-        const result=await r.decodeFromImageElement(img);
-        const text=result?.getText?.()||result?.text;
-        if(!text) throw new Error('JANコードを検出できませんでした。');
-        currentJan=normalizeJan(text); $('scanMsg').textContent='JANコードを読み取りました'; $('cameraDiag').innerHTML=`<strong>JAN：${esc(currentJan)}</strong>`; $('janResultValue').textContent=currentJan; $('janResult').classList.remove('hidden');
-      }catch(err){$('scanMsg').textContent=err.message||'JANコードを読み取れませんでした。';}
-      finally{URL.revokeObjectURL(url)}
-    }; img.src=url;
-  }catch(err){$('scanMsg').textContent=err.message||'読み取りに失敗しました。'}
-  e.target.value='';
-});
-function stopCamera(){if(reader){try{reader.reset()}catch(e){}reader=null}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
+function stopCamera(){if(window.__nativeScanStop){try{window.__nativeScanStop()}catch(e){}window.__nativeScanStop=null}if(reader){try{reader.reset()}catch(e){}reader=null}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
 $('installHelp').onclick=()=>alert('iPhoneのSafariで共有ボタン →「ホーム画面に追加」でアプリのように使えます。');document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show(b.dataset.back));$('clearData').onclick=()=>{if(confirm('商品・価格・買い物リストをすべて削除しますか？')){localStorage.removeItem(DBKEY);state={products:{},customProducts:{},records:[],shoppingList:[]};renderHome();toast('削除しました')}};
 load();renderHome();$('dateInput').value=today();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
