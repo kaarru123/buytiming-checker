@@ -1,5 +1,6 @@
 const DBKEY="buytiming_v5_1";
 let state={products:{},customProducts:{},records:[],shoppingList:[]};let currentJan=null,currentProduct=null,currentCustom=null,currentStore=null,stream=null,reader=null,currentCustomCategory="";let scanTimer=null,scanRunning=false,scanAttempts=0,scanHits=new Map();
+let scanDiag={startedAt:0,frames:0,decodeCalls:0,decodeHits:0,errors:0,lastError:"",lastMode:"",nativeAvailable:false,nativeCalls:0,nativeHits:0,lastResult:"",lastResultAt:0,videoWidth:0,videoHeight:0,trackSettings:null,trackCapabilities:null};
 const $=id=>document.getElementById(id); const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m]));
 function load(){try{const x=JSON.parse(localStorage.getItem(DBKEY));if(x)state={products:{},customProducts:{},records:[],shoppingList:[],...x}}catch(e){}} function save(){localStorage.setItem(DBKEY,JSON.stringify(state));renderHome()}
 function today(){return new Date().toISOString().slice(0,10)}
@@ -104,88 +105,136 @@ function scanCanvasFromVideo(video, crop){
   return canvas;
 }
 function resetScanCandidates(){scanHits.clear();scanAttempts=0}
+function resetScanDiag(){
+  scanDiag={startedAt:Date.now(),frames:0,decodeCalls:0,decodeHits:0,errors:0,lastError:"",lastMode:"",nativeAvailable:('BarcodeDetector' in window),nativeCalls:0,nativeHits:0,lastResult:"",lastResultAt:0,videoWidth:0,videoHeight:0,trackSettings:null,trackCapabilities:null};
+  renderScanDiag();
+}
+function diagError(e){
+  scanDiag.errors++;
+  scanDiag.lastError=`${e?.name||'Error'}: ${e?.message||String(e)}`.slice(0,220);
+}
+function renderScanDiag(){
+  const el=$('scanDiagnostics'); if(!el) return;
+  const sec=Math.max(0,(Date.now()-(scanDiag.startedAt||Date.now()))/1000);
+  const fps=sec?Math.round(scanDiag.frames/sec):0;
+  const settings=scanDiag.trackSettings||{};
+  el.innerHTML=`<div class="diag-grid">
+    <div><b>カメラ</b><span>${scanDiag.videoWidth||0}×${scanDiag.videoHeight||0}</span></div>
+    <div><b>映像フレーム</b><span>${scanDiag.frames}（${fps}/秒）</span></div>
+    <div><b>解析回数</b><span>${scanDiag.decodeCalls}</span></div>
+    <div><b>検出回数</b><span>${scanDiag.decodeHits}</span></div>
+    <div><b>Native検出</b><span>${scanDiag.nativeAvailable?'対応':'非対応'} / ${scanDiag.nativeCalls}回</span></div>
+    <div><b>解析方式</b><span>${esc(scanDiag.lastMode||'準備中')}</span></div>
+    <div><b>候補</b><span>${scanDiag.lastResult?esc(scanDiag.lastResult):'なし'}</span></div>
+    <div><b>エラー</b><span>${scanDiag.errors}${scanDiag.lastError?` / ${esc(scanDiag.lastError)}`:''}</span></div>
+  </div>
+  <details><summary>詳細情報</summary>
+    <div class="diag-detail">facingMode: ${esc(settings.facingMode||'—')}<br>width: ${esc(settings.width||'—')} / height: ${esc(settings.height||'—')}<br>zoom: ${esc(settings.zoom??'—')}<br>focusMode: ${esc(settings.focusMode||'—')}<br>torch: ${esc(settings.torch??'—')}</div>
+  </details>`;
+}
 function registerScanHit(raw){
   const jan=normalizeJan(raw);
-  if(!/^\d{8}$|^\d{13}$/.test(jan)) return false;
+  scanDiag.lastResult=String(raw||'').slice(0,40);
+  scanDiag.lastResultAt=Date.now();
+  if(!/^\d{8}$|^\d{12}$|^\d{13}$/.test(jan)) return false;
   const now=Date.now();
   for(const [k,v] of scanHits){if(now-v.last>1800)scanHits.delete(k)}
   const v=scanHits.get(jan)||{count:0,last:0};
-  v.count++;v.last=now;scanHits.set(jan,v);
+  v.count++;v.last=now;scanHits.set(jan,v);scanDiag.decodeHits++;
   $('cameraDiag').textContent=`自動読み取り中… 試行 ${scanAttempts}回 ・ 候補 ${jan}（${v.count}/2）`;
   if(v.count>=2){showScanSuccess(jan);return true}
   return false;
 }
 function startBarcodeLoop(video){
   scanRunning=true; resetScanCandidates();
-  const run=()=>{
-    if(!scanRunning||!stream||video.readyState<2){if(scanRunning)scanTimer=setTimeout(run,150);return}
-    scanAttempts++;
+  const run=async()=>{
+    if(!scanRunning||!stream||video.readyState<2){if(scanRunning)scanTimer=setTimeout(run,120);return}
+    scanAttempts++; scanDiag.frames++; scanDiag.videoWidth=video.videoWidth; scanDiag.videoHeight=video.videoHeight;
+    if(scanAttempts%5===0) renderScanDiag();
     let found=false;
-    try{
-      // 中央の読み取り領域を優先。4回に1回は全画面も解析して端のバーコードを拾う。
-      const crop=(scanAttempts%4)!==0;
-      const canvas=scanCanvasFromVideo(video,crop);
-      const result=reader.decodeFromCanvas(canvas);
-      if(result){const raw=result.getText?.()||result.text||'';found=registerScanHit(raw)}
-    }catch(e){
-      // NotFound / Checksum / Format は通常の「まだ見つからない」なので無視して再試行。
+    // 1) BarcodeDetectorが利用可能ならネイティブ解析も試す（Safariでは通常非対応）
+    if(scanDiag.nativeAvailable && scanAttempts%2===0){
+      try{
+        if(!window.__barcodeDetector) window.__barcodeDetector=new BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','itf']});
+        scanDiag.nativeCalls++; scanDiag.lastMode='BarcodeDetector';
+        const hits=await window.__barcodeDetector.detect(video);
+        if(hits?.length){for(const h of hits){if(registerScanHit(h.rawValue)){found=true;break}}}
+      }catch(e){diagError(e)}
+    }
+    // 2) 同じvideo映像をCanvasに取り込み、ZXingで解析
+    if(!found && reader){
+      try{
+        scanDiag.decodeCalls++; scanDiag.lastMode=(scanAttempts%4===0)?'ZXing / 全画面':'ZXing / 中央クロップ';
+        const crop=(scanAttempts%4)!==0;
+        const canvas=scanCanvasFromVideo(video,crop);
+        const result=reader.decodeFromCanvas(canvas);
+        if(result){const raw=result.getText?.()||result.text||'';found=registerScanHit(raw)}
+      }catch(e){diagError(e)}
     }
     if(scanRunning&&!found) scanTimer=setTimeout(run,120);
   };
   run();
 }
 function showScanSuccess(jan){
-  currentJan=jan;
-  scanRunning=false;
+  currentJan=jan; scanRunning=false;
   if(scanTimer){clearTimeout(scanTimer);scanTimer=null}
   $('scanMsg').textContent='読み取り完了';
   $('cameraDiag').innerHTML=`<strong>バーコードを認識しました</strong> ・ ${esc(jan)}`;
-  $('janResultValue').textContent=jan;
-  $('scanSuccessValue').textContent=jan;
-  $('scanSuccess').classList.remove('hidden');
-  $('cameraCard').classList.add('scan-success-active');
+  $('janResultValue').textContent=jan; $('scanSuccessValue').textContent=jan;
+  $('scanSuccess').classList.remove('hidden'); $('cameraCard').classList.add('scan-success-active');
   if(navigator.vibrate) try{navigator.vibrate([45,35,90])}catch(e){}
-  toast('商品バーコードを読み取りました');
-  setTimeout(()=>{$('janResult').classList.remove('hidden');},220);
-  setTimeout(()=>stopCamera(),650);
-}
-function acceptDecoded(raw){return registerScanHit(raw)}
-
-async function startNativeDetector(video){
-  // BarcodeDetectorが使える端末でも、今回はZXingの同一canvasループを優先する。
-  // Safari間の実装差による二重解析を避けるため無効化。
-  return false;
+  toast('商品バーコードを読み取りました'); renderScanDiag();
+  setTimeout(()=>{$('janResult').classList.remove('hidden');},220); setTimeout(()=>stopCamera(),650);
 }
 async function startCamera(){
-  stopCamera();
-  $('cameraHelp').classList.add('hidden');
-  $('janResult').classList.add('hidden');
-  $('scanSuccess').classList.add('hidden');
-  $('cameraCard').classList.remove('scan-success-active');
-  $('scanMsg').textContent='カメラを起動しています…';
-  $('cameraDiag').textContent='';
+  stopCamera(); resetScanDiag();
+  $('cameraHelp').classList.add('hidden'); $('janResult').classList.add('hidden'); $('scanSuccess').classList.add('hidden'); $('cameraCard').classList.remove('scan-success-active');
+  $('scanMsg').textContent='カメラを起動しています…'; $('cameraDiag').textContent='';
   try{
-    if(!window.isSecureContext) throw Object.assign(new Error('HTTPS'),{name:'SecurityError'});
-    if(!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('getUserMedia unavailable'),{name:'NotSupportedError'});
+    if(!window.isSecureContext) throw Object.assign(new Error('HTTPSが必要です'),{name:'SecurityError'});
+    if(!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('getUserMediaが利用できません'),{name:'NotSupportedError'});
     stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
-    const video=$('video');video.srcObject=stream;video.setAttribute('playsinline','');video.muted=true;await video.play();
+    const video=$('video'); video.srcObject=stream; video.setAttribute('playsinline',''); video.muted=true; await video.play();
+    const track=stream.getVideoTracks()[0]; if(track){try{scanDiag.trackSettings=track.getSettings();}catch(e){} try{scanDiag.trackCapabilities=track.getCapabilities?.();}catch(e){}}
+    scanDiag.videoWidth=video.videoWidth; scanDiag.videoHeight=video.videoHeight;
     $('scanMsg').textContent='商品バーコードを枠に合わせてください';
-    $('cameraDiag').textContent='自動読み取り中… 写真撮影は不要です。';
+    $('cameraDiag').textContent='診断モード：カメラは起動済み。バーコード解析を開始します。';
     const ok=await loadZXing();
-    if(!ok){$('cameraDiag').textContent='カメラは起動しましたが、バーコード読み取り機能を読み込めませんでした。Safariでページを再読み込みして再試行してください。';return}
-    reader=makeZXingReader();
-    startBarcodeLoop(video);
+    if(!ok){$('cameraDiag').textContent='診断：カメラはOKですがZXingの読み込みに失敗しました。';renderScanDiag();return}
+    reader=makeZXingReader(); startBarcodeLoop(video); renderScanDiag();
   }catch(e){
-    stopCamera();
-    const msg=cameraErrorMessage(e);
-    $('scanMsg').textContent='カメラを起動できませんでした';
-    $('cameraDiag').textContent=msg;$('cameraHelpText').textContent=msg;$('cameraHelp').classList.remove('hidden');
+    diagError(e); stopCamera(); const msg=cameraErrorMessage(e); $('scanMsg').textContent='カメラを起動できませんでした'; $('cameraDiag').textContent=msg; $('cameraHelpText').textContent=msg; $('cameraHelp').classList.remove('hidden'); renderScanDiag();
   }
 }
 $('useJanBtn').onclick=()=>{if(currentJan){lookup()}};
 $('rescanBtn').onclick=()=>startCamera();
 $('cameraRetry').onclick=()=>startCamera();
 $('cameraClose').onclick=()=>{$('cameraHelp').classList.add('hidden')};
+$('copyDiagBtn')?.addEventListener('click',async()=>{
+  const s=scanDiag||{};
+  const settings=s.trackSettings||{};
+  const text=[
+    '買い時チェッカー 診断情報',
+    `URL: ${location.href}`,
+    `時間: ${new Date().toLocaleString('ja-JP')}`,
+    `SecureContext: ${window.isSecureContext}`,
+    `Camera API: ${!!navigator.mediaDevices?.getUserMedia}`,
+    `Video: ${s.videoWidth||0}x${s.videoHeight||0}`,
+    `Frames: ${s.frames||0}`,
+    `Decode calls: ${s.decodeCalls||0}`,
+    `Decode hits: ${s.decodeHits||0}`,
+    `BarcodeDetector: ${s.nativeAvailable?'対応':'非対応'}`,
+    `Native calls/hits: ${s.nativeCalls||0}/${s.nativeHits||0}`,
+    `Mode: ${s.lastMode||''}`,
+    `Candidate: ${s.lastResult||''}`,
+    `Errors: ${s.errors||0}`,
+    `Last error: ${s.lastError||''}`,
+    `facingMode: ${settings.facingMode||''}`,
+    `width/height: ${settings.width||''}/${settings.height||''}`,
+    `focusMode: ${settings.focusMode||''}`
+  ].join('\n');
+  try{await navigator.clipboard.writeText(text);toast('診断情報をコピーしました')}catch(e){prompt('診断情報をコピーしてください',text)}
+});
 function stopCamera(){scanRunning=false;if(scanTimer){clearTimeout(scanTimer);scanTimer=null}resetScanCandidates();if(window.__nativeScanStop){try{window.__nativeScanStop()}catch(e){}window.__nativeScanStop=null}if(reader){try{reader.reset()}catch(e){}reader=null}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}}
 $('installHelp').onclick=()=>alert('iPhoneのSafariで共有ボタン →「ホーム画面に追加」でアプリのように使えます。');document.querySelectorAll('[data-back]').forEach(b=>b.onclick=()=>show(b.dataset.back));$('clearData').onclick=()=>{if(confirm('商品・価格・買い物リストをすべて削除しますか？')){localStorage.removeItem(DBKEY);state={products:{},customProducts:{},records:[],shoppingList:[]};renderHome();toast('削除しました')}};
 load();renderHome();$('dateInput').value=today();if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});
