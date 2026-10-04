@@ -151,27 +151,43 @@ async function startCamera(){
   try{
     if(!window.isSecureContext) throw Object.assign(new Error('HTTPS'),{name:'SecurityError'});
     if(!navigator.mediaDevices?.getUserMedia) throw Object.assign(new Error('getUserMedia unavailable'),{name:'NotSupportedError'});
-    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});
-    $('video').srcObject=stream;
-    await $('video').play();
-    $('scanMsg').textContent='商品バーコードにカメラを向けてください';
+
+    // カメラはこの1回だけ取得する。読み取り側で別ストリームを作らない。
+    stream=await navigator.mediaDevices.getUserMedia({
+      video:{
+        facingMode:{ideal:'environment'},
+        width:{ideal:1920},
+        height:{ideal:1080}
+      },
+      audio:false
+    });
+
+    const video=$('video');
+    video.srcObject=stream;
+    video.setAttribute('playsinline','');
+    video.muted=true;
+    await video.play();
+
+    $('scanMsg').textContent='商品バーコードを枠に合わせてください';
     $('cameraDiag').textContent='自動読み取り中…写真撮影は不要です。';
 
-    // Safari等でBarcodeDetectorが使える場合はネイティブ検出を優先。
-    const nativeStarted=await startNativeDetector($('video'));
-    if(nativeStarted) return;
-
-    // フォールバック：ZXingをカメラ映像へ直接接続する。別途写真撮影は要求しない。
+    // ZXingを読み込む。重要：既に起動しているvideo要素そのものを解析する。
     const ok=await loadZXing();
     if(!ok){
-      $('cameraDiag').textContent='カメラは起動しましたが、自動JAN読み取り機能を読み込めませんでした。ページを再読み込みして再試行してください。';
+      $('cameraDiag').textContent='カメラは起動しましたが、バーコード読み取り機能を読み込めませんでした。Safariでページを再読み込みして再試行してください。';
       return;
     }
+
     reader=makeZXingReader();
-    reader.decodeFromConstraints({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}}},$('video'),(result,err)=>{
+
+    // 追加のgetUserMedia/decodeFromConstraintsは使わない。
+    // 現在表示しているvideoストリームをそのままZXingに渡す。
+    reader.decodeFromVideoElement(video,(result,err)=>{
       if(result){
         const raw=result.getText?.()||result.text||'';
-        if(acceptDecoded(raw)) return;
+        if(acceptDecoded(raw)){
+          $('cameraDiag').textContent='バーコードを認識しました。';
+        }
       }
     });
   }catch(e){
