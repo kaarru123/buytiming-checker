@@ -1,4 +1,4 @@
-const CACHE='buytiming-v5-1-ui-fix-v3';
+const CACHE='buytiming-v5-1-ui-fix-v5';
 self.addEventListener('install',e=>self.skipWaiting());
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{

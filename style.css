@@ -22,9 +22,9 @@
 @media (max-width:420px){.quick{width:calc(100% - 20px)}.list-item{gap:8px}.list-actions{gap:5px}.list-actions .smallbtn{min-width:48px;padding:8px 8px}.check{width:25px;height:25px}}
 
 
-/* Ver.5.1 UI FIX v3: shopping list width and back button */
+/* Ver.5.1 UI FIX v4: shopping list width slightly narrower */
 .quick{
-  width:calc(100% - 32px) !important;
+  width:calc(100% - 48px) !important;
   max-width:640px !important;
   margin-left:auto !important;
   margin-right:auto !important;
@@ -80,7 +80,7 @@
 }
 @media (max-width:420px){
   .quick{
-    width:calc(100% - 28px) !important;
+    width:calc(100% - 48px) !important;
   }
   .list-item{
     gap:7px;
