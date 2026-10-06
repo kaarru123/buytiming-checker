@@ -8,3 +8,15 @@
 @keyframes scanPulse{0%{transform:scale(1);opacity:1}50%{transform:scale(1.035);opacity:.75}100%{transform:scale(1);opacity:1}}
 
 .diag-card{padding:13px;margin-top:10px;background:#f8fafc;border:1px solid #e5e7eb;box-shadow:none}.diag-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}.diagnostics{font-size:11px;color:#374151}.diag-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}.diag-grid>div{background:#fff;border-radius:9px;padding:8px;border:1px solid #edf0f2}.diag-grid b{display:block;color:#6b7280;font-size:10px;margin-bottom:2px}.diag-grid span{display:block;word-break:break-word}.diag-detail{background:#fff;border-radius:9px;padding:9px;margin-top:7px;line-height:1.7;word-break:break-all}.diagnostics details{margin-top:7px}.diagnostics summary{cursor:pointer;color:#4b5563}.scan-success-active .diag-card{border-color:#d1d5db}
+
+/* 使いやすさ改善：買い物リストを少しだけ内側にして、長い商品名にも対応 */
+.quick{width:calc(100% - 28px);max-width:680px;margin-left:auto;margin-right:auto}
+.list-item{min-width:0}
+.list-main{min-width:0;overflow-wrap:anywhere}
+.list-main b{display:block;overflow-wrap:anywhere;word-break:break-word;line-height:1.4}
+.list-actions{display:flex;align-items:center;gap:6px;flex:none}
+.list-actions .smallbtn{min-width:52px;white-space:nowrap}
+.list-actions .delete-list-btn{background:#fee2e2;color:#991b1b}
+.back{min-height:44px;padding:10px 13px;border-radius:10px;background:#eef2f5;color:#111827;font-size:16px;line-height:1;display:inline-flex;align-items:center;gap:3px;touch-action:manipulation}
+.top{gap:9px;margin:2px 0 14px}
+@media (max-width:420px){.quick{width:calc(100% - 20px)}.list-item{gap:8px}.list-actions{gap:5px}.list-actions .smallbtn{min-width:48px;padding:8px 8px}.check{width:25px;height:25px}}

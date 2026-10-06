@@ -11,8 +11,9 @@ function renderHome(){
  $('productCount').textContent=Object.keys(state.products).length+Object.keys(state.customProducts).length;$('recordCount').textContent=state.records.length;
  const rs=[...state.records].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);$('recent').innerHTML=rs.length?rs.map(r=>`<div class="record"><div><b>${esc(r.name)}</b><div class="muted">${esc(r.store)}・${esc(r.date)}</div></div><div class="price">¥${Number(r.price).toLocaleString()}</div></div>`).join(''):'まだ記録がありません。';renderList();
 }
-function renderList(){const el=$('shoppingList');if(!state.shoppingList.length){el.innerHTML='<div class="empty">まだありません。買う予定の商品を追加しましょう。</div>';return}el.innerHTML=state.shoppingList.map((x,i)=>`<div class="list-item"><button class="check ${x.done?'done':''}" data-check="${i}">${x.done?'✓':''}</button><div class="list-main ${x.done?'done':''}"><b>${esc(x.name)}</b><div class="muted">${esc(x.category||'')}</div></div><button class="smallbtn" data-list-open="${i}">価格</button></div>`).join('');el.querySelectorAll('[data-check]').forEach(b=>b.onclick=()=>{state.shoppingList[+b.dataset.check].done=!state.shoppingList[+b.dataset.check].done;save()});el.querySelectorAll('[data-list-open]').forEach(b=>b.onclick=()=>openListItem(+b.dataset.listOpen))}
+function renderList(){const el=$('shoppingList');if(!state.shoppingList.length){el.innerHTML='<div class="empty">まだありません。買う予定の商品を追加しましょう。</div>';return}el.innerHTML=state.shoppingList.map((x,i)=>`<div class="list-item"><button class="check ${x.done?'done':''}" data-check="${i}" aria-label="${x.done?'購入済みを解除':'購入済みにする'}">${x.done?'✓':''}</button><div class="list-main ${x.done?'done':''}"><b>${esc(x.name)}</b><div class="muted">${esc(x.category||'')}</div></div><div class="list-actions"><button class="smallbtn" data-list-open="${i}">価格</button><button class="smallbtn delete-list-btn" data-list-delete="${i}">削除</button></div></div>`).join('');el.querySelectorAll('[data-check]').forEach(b=>b.onclick=()=>{state.shoppingList[+b.dataset.check].done=!state.shoppingList[+b.dataset.check].done;save()});el.querySelectorAll('[data-list-open]').forEach(b=>b.onclick=()=>openListItem(+b.dataset.listOpen));el.querySelectorAll('[data-list-delete]').forEach(b=>b.onclick=()=>deleteListItem(+b.dataset.listDelete))}
 function addListItem(){const name=prompt('買い物リストに追加する商品名');if(!name?.trim())return;state.shoppingList.push({name:name.trim(),category:'',done:false});save();toast('買い物リストに追加しました')}
+function deleteListItem(i){const item=state.shoppingList[i];if(!item)return;if(!confirm(`「${item.name}」を買い物リストから削除しますか？`))return;state.shoppingList.splice(i,1);save();toast('買い物リストから削除しました')}
 function openListItem(i){const x=state.shoppingList[i];const p=findProductByName(x.name);if(p){if(p.jan){currentJan=p.jan;lookup()}else{currentCustom=p;openCustomPrice(p)}}else{toast('価格履歴がない商品です。JANなし商品から登録できます')}}
 function findProductByName(n){return Object.values(state.products).find(p=>p.name===n)||Object.values(state.customProducts).find(p=>p.name===n)}
 function lookup(){const p=state.products[currentJan];if(p){currentProduct=p;$('lookupBody').innerHTML=`<div class="card"><div class="product">${p.image?`<img src="${p.image}">`:`<div class="noimg">📦</div>`}<div><b>${esc(p.name)}</b><div class="muted">${esc(p.brand||'')}</div><div class="muted">${esc(p.qty||'')}</div></div></div>${scoreHtml(p,p.jan)}<button id="addPrice" class="primary">この商品の価格を記録</button><button id="addToList" class="secondary">🛒 買い物リストに追加</button><button id="editProduct" class="secondary">商品情報を編集</button></div>`;$('addPrice').onclick=()=>openPrice(p);$('addToList').onclick=()=>addProductToList(p);$('editProduct').onclick=()=>openRegister(p)}else{$('lookupBody').innerHTML=`<div class="card"><div class="notice">このJANコードの商品はまだ登録されていません。</div><p class="muted">商品名と、必要なら商品写真を登録してください。</p><button id="newProduct" class="primary">この商品を登録する</button></div>`;$('newProduct').onclick=()=>openRegister(null)}show('lookup')}
@@ -175,6 +176,60 @@ function startBarcodeLoop(video){
   };
   run();
 }
+async function lookupProductAuto(jan){
+  currentJan=jan;
+  const local=state.products[jan];
+  if(local){
+    currentProduct=local;
+    lookup();
+    return;
+  }
+
+  // 未登録なら外部の商品データベースも自動検索する。
+  show('lookup');
+  $('lookupBody').innerHTML=`<div class="card"><div class="loading">商品情報を検索しています…</div><div class="muted">バーコード：${esc(jan)}</div></div>`;
+
+  const endpoints=[
+    `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(jan)}.json`,
+    `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(jan)}.json?fields=code,product_name,product_name_ja,brands,quantity,image_front_url`
+  ];
+  let data=null;
+  for(const url of endpoints){
+    try{
+      const res=await fetch(url,{headers:{Accept:'application/json'}});
+      if(!res.ok) continue;
+      const json=await res.json();
+      if(json?.status===1 && json.product){data=json;break}
+    }catch(e){/* ネットワーク失敗時は登録画面へ */}
+  }
+
+  if(data?.product){
+    const x=data.product;
+    const name=(x.product_name_ja||x.product_name||'').trim();
+    const brand=(x.brands||'').split(',')[0].trim();
+    const qty=(x.quantity||'').trim();
+    if(name){
+      const product={
+        jan,
+        name,
+        brand,
+        qty,
+        unitLabel:'1個',
+        image:x.image_front_url||''
+      };
+      state.products[jan]=product;
+      save();
+      currentProduct=product;
+      lookup();
+      toast('商品情報を取得しました');
+      return;
+    }
+  }
+
+  // 外部DBにもなければ、今まで通り登録画面へ誘導する。
+  lookup();
+}
+
 function showScanSuccess(jan){
   currentJan=jan; scanRunning=false;
   if(scanTimer){clearTimeout(scanTimer);scanTimer=null}
@@ -184,7 +239,12 @@ function showScanSuccess(jan){
   $('scanSuccess').classList.remove('hidden'); $('cameraCard').classList.add('scan-success-active');
   if(navigator.vibrate) try{navigator.vibrate([45,35,90])}catch(e){}
   toast('商品バーコードを読み取りました'); renderScanDiag();
-  setTimeout(()=>{$('janResult').classList.remove('hidden');},220); setTimeout(()=>stopCamera(),650);
+
+  // 成功エフェクトを少し見せたあと、自動で商品検索へ進む。
+  setTimeout(()=>{
+    stopCamera();
+    lookupProductAuto(jan);
+  },900);
 }
 async function startCamera(){
   stopCamera(); resetScanDiag();
@@ -206,7 +266,7 @@ async function startCamera(){
     diagError(e); stopCamera(); const msg=cameraErrorMessage(e); $('scanMsg').textContent='カメラを起動できませんでした'; $('cameraDiag').textContent=msg; $('cameraHelpText').textContent=msg; $('cameraHelp').classList.remove('hidden'); renderScanDiag();
   }
 }
-$('useJanBtn').onclick=()=>{if(currentJan){lookup()}};
+$('useJanBtn').onclick=()=>{if(currentJan){lookupProductAuto(currentJan)}};
 $('rescanBtn').onclick=()=>startCamera();
 $('cameraRetry').onclick=()=>startCamera();
 $('cameraClose').onclick=()=>{$('cameraHelp').classList.add('hidden')};

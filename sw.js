@@ -1,4 +1,4 @@
-const CACHE='buytiming-v5-1-diagnostic-v1';
+const CACHE='buytiming-v5-1-auto-lookup-v2';
 self.addEventListener('install',e=>self.skipWaiting());
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{
