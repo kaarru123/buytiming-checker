@@ -41,12 +41,12 @@ $('scanBtn').onclick=()=>{show('scanner');setTimeout(startCamera,80)};
 $('stopBtn')?.addEventListener('click',()=>stopCamera());
 
 async function loadZXing(){
-  if(window.ZXing?.BrowserMultiFormatReader) return true;
+  if(window.ZXingBrowser?.BrowserMultiFormatReader) return true;
   return await new Promise(resolve=>{
     const s=document.createElement('script');
-    s.src='https://cdn.jsdelivr.net/npm/@zxing/browser@0.1.5/umd/index.min.js?janfix=20261002';
+    s.src='https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js?janfix=20261004';
     s.async=true;
-    s.onload=()=>resolve(!!window.ZXing?.BrowserMultiFormatReader);
+    s.onload=()=>resolve(!!window.ZXingBrowser?.BrowserMultiFormatReader);
     s.onerror=()=>resolve(false);
     document.head.appendChild(s);
   });
@@ -74,16 +74,16 @@ function validJan(text){
 }
 function makeZXingReader(){
   const hints=new Map();
-  if(window.ZXing?.DecodeHintType && window.ZXing?.BarcodeFormat){
-    hints.set(window.ZXing.DecodeHintType.POSSIBLE_FORMATS,[
-      window.ZXing.BarcodeFormat.EAN_13,
-      window.ZXing.BarcodeFormat.EAN_8,
-      window.ZXing.BarcodeFormat.UPC_A,
-      window.ZXing.BarcodeFormat.UPC_E
+  if(window.ZXingBrowser?.DecodeHintType && window.ZXingBrowser?.BarcodeFormat){
+    hints.set(window.ZXingBrowser.DecodeHintType.POSSIBLE_FORMATS,[
+      window.ZXingBrowser.BarcodeFormat.EAN_13,
+      window.ZXingBrowser.BarcodeFormat.EAN_8,
+      window.ZXingBrowser.BarcodeFormat.UPC_A,
+      window.ZXingBrowser.BarcodeFormat.UPC_E
     ]);
     // iPhone SafariではTRY_HARDERが逆に不安定になる既知の報告があるため、今回は使わない。
   }
-  const Reader=window.ZXing?.BrowserMultiFormatOneDReader||window.ZXing?.BrowserMultiFormatReader;
+  const Reader=window.ZXingBrowser?.BrowserMultiFormatOneDReader||window.ZXingBrowser?.BrowserMultiFormatReader;
   if(!Reader) throw new Error('ZXing OneD reader unavailable');
   // 120msごとに解析。失敗時も連続して再試行し、成功後は画面側で確定する。
   return new Reader(hints,{delayBetweenScanAttempts:120,delayBetweenScanSuccess:800,tryPlayVideoTimeout:5000});
