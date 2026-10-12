@@ -1,4 +1,4 @@
-const CACHE='buytiming-record-edit-20261013-v1';
+const CACHE='buytiming-home-actions-20261013';
 self.addEventListener('install',e=>self.skipWaiting());
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{
