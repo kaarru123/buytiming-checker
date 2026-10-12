@@ -109,3 +109,6 @@
 .hero #nonJanBtn.home-main-action{margin-top:14px;background:#dff2e7;color:#14532d;border:1px solid #b7dfc6}
 .hero #scanBtn.home-main-action{box-shadow:0 3px 10px rgba(17,24,39,.13)}
 .hero #manualBtn.home-manual-action{margin-top:16px;min-height:42px;padding:10px 12px;font-size:13px;font-weight:600;color:#596270;background:#eef0f3;border-radius:10px}
+
+/* Tappable home summaries and recent entries */
+.stat-link{display:block;width:100%;border:1px solid transparent;cursor:pointer;color:inherit;font:inherit;min-height:108px}.stat-link:active,.recent-record:active{background:#eef2ff}.stat-link:focus-visible,.recent-record:focus-visible{outline:3px solid #93c5fd;outline-offset:2px}.recent-record{width:100%;border:0;border-top:1px solid #eee;background:transparent;color:inherit;text-align:left;font:inherit;cursor:pointer;align-items:center}.recent-record:first-child{border-top:0}.recent-record>div:first-child{min-width:0;overflow-wrap:anywhere}.recent-record .price{white-space:nowrap}.recent-record .price span{color:#9ca3af;font-size:18px}.data-tabs{display:flex;gap:8px;margin:0 0 12px}.data-tabs button{flex:1;min-height:44px}.data-tabs .selected{background:#dbeafe;color:#1d4ed8;border:1px solid #93c5fd}

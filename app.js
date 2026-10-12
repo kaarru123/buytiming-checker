@@ -7,9 +7,11 @@ function today(){return new Date().toISOString().slice(0,10)}
 function show(id){stopCamera();document.querySelectorAll('.screen').forEach(x=>x.classList.remove('active'));$(id).classList.add('active');window.scrollTo(0,0);if(id==='home')renderHome();if(id==='data')renderData();if(id==='janless')renderJanless()}
 function toast(s){const t=$('toast');t.textContent=s;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200)}
 function scoreHtml(p,key=p.jan){const rs=state.records.filter(r=>r.key===key||r.jan===key).map(r=>Number(r.unitPrice??r.price)).filter(Boolean);if(!rs.length)return `<div class="muted">まだ価格履歴がありません。価格を1件登録すると買い時判定が始まります。</div>`;const avg=rs.reduce((a,b)=>a+b,0)/rs.length,min=Math.min(...rs),max=Math.max(...rs),latest=rs[0];let cls='normal',label='標準的な価格帯';if(latest<=avg*.9){cls='good';label='かなり買いやすい価格';}else if(latest>=avg*1.1){cls='high';label='過去平均より高め';}return `<div class="score ${cls}"><div>${label}</div><strong>¥${Math.round(latest).toLocaleString()} / ${esc(p.unitLabel||'比較単位')}</strong><div class="muted">平均 ¥${Math.round(avg).toLocaleString()} ・ 最安 ¥${Math.round(min).toLocaleString()} ・ 最高 ¥${Math.round(max).toLocaleString()} ・ ${rs.length}件</div></div>`}
+let dataView="all";
+function openData(view="all"){dataView=view;show("data");}
 function renderHome(){
  $('productCount').textContent=Object.keys(state.products).length+Object.keys(state.customProducts).length;$('recordCount').textContent=state.records.length;
- const rs=[...state.records].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);$('recent').innerHTML=rs.length?rs.map(r=>`<div class="record"><div><b>${esc(r.name)}</b><div class="muted">${esc(r.store)}・${esc(r.date)}</div></div><div class="price">¥${Number(r.price).toLocaleString()}</div></div>`).join(''):'まだ記録がありません。';renderList();
+ const rs=state.records.map((r,i)=>({...r,_index:i})).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))).slice(0,5);$('recent').innerHTML=rs.length?rs.map(r=>`<button type="button" class="record recent-record" data-recent-index="${r._index}"><div><b>${esc(r.name)}</b><div class="muted">${esc(r.store||'')}・${esc(r.date||'')}</div></div><div class="price">¥${Number(r.price).toLocaleString()} <span aria-hidden="true">›</span></div></button>`).join(''):'まだ記録がありません。';$('recent').querySelectorAll('[data-recent-index]').forEach(b=>b.onclick=()=>editRecord(Number(b.dataset.recentIndex)));renderList();
 }
 function renderList(){const el=$('shoppingList');if(!state.shoppingList.length){el.innerHTML='<div class="empty">まだありません。買う予定の商品を追加しましょう。</div>';return}el.innerHTML=state.shoppingList.map((x,i)=>`<div class="list-item"><button class="check ${x.done?'done':''}" data-check="${i}" aria-label="${x.done?'購入済みを解除':'購入済みにする'}">${x.done?'✓':''}</button><div class="list-main ${x.done?'done':''}"><b>${esc(x.name)}</b><div class="muted">${esc(x.category||'')}</div></div><div class="list-actions"><button class="smallbtn" data-list-open="${i}">価格</button><button class="smallbtn delete-list-btn" data-list-delete="${i}">削除</button></div></div>`).join('');el.querySelectorAll('[data-check]').forEach(b=>b.onclick=()=>{state.shoppingList[+b.dataset.check].done=!state.shoppingList[+b.dataset.check].done;save()});el.querySelectorAll('[data-list-open]').forEach(b=>b.onclick=()=>openListItem(+b.dataset.listOpen));el.querySelectorAll('[data-list-delete]').forEach(b=>b.onclick=()=>deleteListItem(+b.dataset.listDelete))}
 function addListItem(){const name=prompt('買い物リストに追加する商品名');if(!name?.trim())return;state.shoppingList.push({name:name.trim(),category:'',done:false});save();toast('買い物リストに追加しました')}
@@ -40,6 +42,12 @@ function renderData(){
  const ps=[...Object.values(state.products),...Object.values(state.customProducts)];
  const rs=state.records.map((r,i)=>({...r,_index:i})).reverse();
  $('dataBody').innerHTML=`<div class="card"><h3>商品 ${ps.length}件</h3>${ps.length?ps.map(p=>`<div class="record"><div>${p.image?`<img class="thumb" src="${esc(p.image)}">`:''}<b>${esc(p.name)}</b><div class="muted">${esc(p.category||'バーコード商品')}</div></div></div>`).join(''):'<div class="empty">登録商品なし</div>'}</div><div class="card"><h3>価格記録 ${rs.length}件</h3><p class="hint">記録ごとに金額・店舗・日付を編集、または削除できます。</p>${rs.length?rs.map(r=>`<div class="record data-record"><div class="data-record-main"><b>${esc(r.name)}</b><div class="muted">${esc(r.store)}・${esc(r.date)}</div>${r.weight?`<div class="muted">重量：${esc(r.weight)}g</div>`:''}${r.qty?`<div class="muted">数量：${esc(r.qty)}</div>`:''}<div class="price">¥${Number(r.price).toLocaleString()}</div></div><div class="record-actions"><button class="smallbtn" data-edit-record="${r._index}">編集</button><button class="smallbtn delete-list-btn" data-delete-record="${r._index}">削除</button></div></div>`).join(''):'<div class="empty">価格記録なし</div>'}</div>`;
+ const cards=$('dataBody').querySelectorAll(':scope > .card');
+ if(dataView==='products' && cards[1])cards[1].style.display='none';
+ if(dataView==='records' && cards[0])cards[0].style.display='none';
+ const tabs=document.createElement('div');tabs.className='data-tabs';tabs.innerHTML=['products','records','all'].map((v,i)=>`<button type="button" class="smallbtn ${dataView===v?'selected':''}" data-data-view="${v}">${['登録商品','価格記録','すべて'][i]}</button>`).join('');
+ $('dataBody').prepend(tabs);
+ tabs.querySelectorAll('button').forEach(b=>b.onclick=()=>{dataView=b.dataset.dataView;renderData()});
  $('dataBody').querySelectorAll('[data-edit-record]').forEach(b=>b.onclick=()=>editRecord(Number(b.dataset.editRecord)));
  $('dataBody').querySelectorAll('[data-delete-record]').forEach(b=>b.onclick=()=>deleteRecord(Number(b.dataset.deleteRecord)));
 }
@@ -74,7 +82,7 @@ $('editRecordForm').addEventListener('submit',e=>{
  r.price=price;r.unitPrice=unitPrice;r.store=store;r.date=date;
  save();show('data');toast('価格記録を修正しました');
 });
-$('addListBtn').onclick=addListItem;$('nonJanBtn').onclick=()=>show('janless');$('dataBtn').onclick=()=>show('data');$('manualBtn').onclick=()=>{const j=prompt('商品バーコード番号を入力してください');if(j){currentJan=j.trim();lookup()}};
+$('addListBtn').onclick=addListItem;$('nonJanBtn').onclick=()=>show('janless');$('dataBtn').onclick=()=>openData('all');$('productStatsBtn').onclick=()=>openData('products');$('recordStatsBtn').onclick=()=>openData('records');$('manualBtn').onclick=()=>{const j=prompt('商品バーコード番号を入力してください');if(j){currentJan=j.trim();lookup()}};
 $('scanBtn').onclick=()=>{show('scanner');setTimeout(startCamera,80)};
 $('stopBtn')?.addEventListener('click',()=>stopCamera());
 
