@@ -1,4 +1,4 @@
-const CACHE='buytiming-stats-detail-20261013-v2';
+const CACHE='buytiming-product-navigation-20261013-v3';
 self.addEventListener('install',e=>self.skipWaiting());
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{
