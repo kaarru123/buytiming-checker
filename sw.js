@@ -1,4 +1,4 @@
-const CACHE='buytiming-tax-display-20261013-v1';
+const CACHE='buytiming-tax-font-20261013-v2';
 self.addEventListener('install',e=>self.skipWaiting());
 self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch',e=>{

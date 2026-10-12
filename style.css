@@ -117,3 +117,8 @@
 
 /* 税込・税別の区別を明示 */
 .tax-price-main{font-size:1.18em;font-weight:800;line-height:1.4}.tax-label{font-size:.67em;font-weight:650;white-space:nowrap}.tax-price-sub{font-size:.78rem;font-weight:500;opacity:.78;margin-top:3px}.tax-price-sub span{font-size:.9em}.history-tax{text-align:right;min-width:116px}.history-tax .tax-price-main{font-size:1rem}.history-tax .tax-price-sub{font-size:.72rem}.score strong .tax-price-sub{font-weight:500}.score strong .tax-price-main{font-size:1.25em}
+/* 商品確認画面：税別目安と税込価格統計の視認性を改善 */
+.score .tax-price-sub{font-size:16px;line-height:1.55;font-weight:650;opacity:1;margin-top:6px}
+.score .tax-price-sub span{font-size:13px;font-weight:500}
+.score > .muted{font-size:16px;line-height:1.65;font-weight:650;color:#4b5563;margin-top:8px}
+@media(max-width:390px){.score > .muted{font-size:15px}.score .tax-price-sub{font-size:15px}}
