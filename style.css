@@ -122,3 +122,9 @@
 .score .tax-price-sub span{font-size:13px;font-weight:500}
 .score > .muted{font-size:16px;line-height:1.65;font-weight:650;color:#4b5563;margin-top:8px}
 @media(max-width:390px){.score > .muted{font-size:15px}.score .tax-price-sub{font-size:15px}}
+
+/* v3: iPhone商品確認画面の価格情報を確実に拡大（strong内の継承も上書き） */
+#lookupBody .score strong .tax-price-sub, #lookupBody .score .tax-price-sub {font-size:20px !important;line-height:1.55 !important;font-weight:750 !important;opacity:1 !important;margin-top:9px !important;color:#374151 !important;}
+#lookupBody .score .tax-price-sub span {font-size:17px !important;font-weight:650 !important;}
+#lookupBody .score > .muted {font-size:20px !important;line-height:1.65 !important;font-weight:750 !important;color:#374151 !important;margin-top:12px !important;overflow-wrap:anywhere;}
+@media(max-width:390px){#lookupBody .score > .muted,#lookupBody .score .tax-price-sub{font-size:19px !important;}}
