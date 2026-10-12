@@ -100,3 +100,6 @@
     font-size:17px !important;
   }
 }
+
+/* Record management */
+.data-nav-btn{display:flex;align-items:center;justify-content:center;gap:10px;width:calc(100% - 28px);min-height:50px;margin:18px auto 0;padding:13px 18px;background:#e5e7eb;color:#374151;border:1px solid #d1d5db;border-radius:13px;font-size:15px;font-weight:650;cursor:pointer}.data-nav-btn span{font-size:24px;line-height:1}.data-record{align-items:center;flex-wrap:wrap}.data-record-main{min-width:0;flex:1 1 160px;overflow-wrap:anywhere}.record-actions{display:flex;gap:8px;flex:none}.record-actions .smallbtn{min-width:54px;min-height:42px;font-weight:650}.record-actions .delete-list-btn{background:#fee2e2;color:#991b1b}.data-record .price{margin-top:6px}

@@ -36,7 +36,44 @@ $('customStoreBtn').onclick=()=>{storeReturn='customPrice';show('store');getLoca
 function getLocation(){if(!navigator.geolocation){$('locMsg').textContent='位置情報に対応していません';return}$('locMsg').textContent='現在地を取得しています…';navigator.geolocation.getCurrentPosition(pos=>{$('locMsg').textContent='現在地を取得しました。近くの店舗を検索しています…';findStores(pos.coords.latitude,pos.coords.longitude)},()=>{$('locMsg').textContent='位置情報を取得できませんでした。店舗名を入力してください。'},{enableHighAccuracy:true,timeout:10000})}
 async function findStores(lat,lon){$('stores').innerHTML="<div class='card'>近くのスーパーを検索中…</div>";try{const q=`[out:json][timeout:10];(nwr["shop"="supermarket"](around:5000,${lat},${lon});nwr["name"~"スーパー|マルナカ|ハローズ|天満屋|イオン|ゆめタウン|コープ|業務スーパー|ザグザグ|ドン・キホーテ"](around:5000,${lat},${lon}););out center 15;`;const res=await fetch('https://overpass-api.de/api/interpreter',{method:'POST',body:q});const data=await res.json();const arr=(data.elements||[]).filter(x=>x.tags?.name).map(x=>({name:x.tags.name,address:x.tags['addr:street']||x.tags['addr:city']||'',lat:x.lat??x.center?.lat,lon:x.lon??x.center?.lon})).slice(0,12);$('stores').innerHTML=arr.length?arr.map(s=>`<div class="store-item"><button data-store='${JSON.stringify(s).replace(/'/g,'&#39;')}'>🏪 <b>${esc(s.name)}</b><div class="muted">${esc(s.address)}</div></button></div>`).join(''):'<div class="card">近くの店舗が見つかりませんでした。</div>';$('stores').querySelectorAll('button').forEach(b=>b.onclick=()=>{currentStore=JSON.parse(b.dataset.store);$('storeText').textContent=currentStore.name;$('customStoreText').textContent=currentStore.name;show(storeReturn)})}catch(e){$('stores').innerHTML='<div class="card">店舗検索に失敗しました。下の入力欄から店舗名を入力してください。</div>'}}
 $('useManual').onclick=()=>{const n=$('storeManual').value.trim();if(!n){toast('店舗名を入力してください');return}currentStore={name:n};$('storeText').textContent=n;$('customStoreText').textContent=n;show(storeReturn)};
-function renderData(){const ps=[...Object.values(state.products),...Object.values(state.customProducts)],rs=state.records;$('dataBody').innerHTML=`<div class="card"><h3>商品 ${ps.length}件</h3>${ps.length?ps.map(p=>`<div class="record"><div>${p.image?`<img class="thumb" src="${p.image}">`:''}<b>${esc(p.name)}</b><div class="muted">${esc(p.category||'JAN商品')}</div></div></div>`).join(''):'<div class="empty">登録商品なし</div>'}</div><div class="card"><h3>価格記録 ${rs.length}件</h3>${rs.length?[...rs].reverse().map(r=>`<div class="record"><div><b>${esc(r.name)}</b><div class="muted">${esc(r.store)}・${esc(r.date)}</div></div><div class="price">¥${Number(r.price).toLocaleString()}</div></div>`).join(''):'<div class="empty">価格記録なし</div>'}</div>`}
+function renderData(){
+ const ps=[...Object.values(state.products),...Object.values(state.customProducts)];
+ const rs=state.records.map((r,i)=>({...r,_index:i})).reverse();
+ $('dataBody').innerHTML=`<div class="card"><h3>商品 ${ps.length}件</h3>${ps.length?ps.map(p=>`<div class="record"><div>${p.image?`<img class="thumb" src="${esc(p.image)}">`:''}<b>${esc(p.name)}</b><div class="muted">${esc(p.category||'バーコード商品')}</div></div></div>`).join(''):'<div class="empty">登録商品なし</div>'}</div><div class="card"><h3>価格記録 ${rs.length}件</h3><p class="hint">記録ごとに金額・店舗・日付を編集、または削除できます。</p>${rs.length?rs.map(r=>`<div class="record data-record"><div class="data-record-main"><b>${esc(r.name)}</b><div class="muted">${esc(r.store)}・${esc(r.date)}</div>${r.weight?`<div class="muted">重量：${esc(r.weight)}g</div>`:''}${r.qty?`<div class="muted">数量：${esc(r.qty)}</div>`:''}<div class="price">¥${Number(r.price).toLocaleString()}</div></div><div class="record-actions"><button class="smallbtn" data-edit-record="${r._index}">編集</button><button class="smallbtn delete-list-btn" data-delete-record="${r._index}">削除</button></div></div>`).join(''):'<div class="empty">価格記録なし</div>'}</div>`;
+ $('dataBody').querySelectorAll('[data-edit-record]').forEach(b=>b.onclick=()=>editRecord(Number(b.dataset.editRecord)));
+ $('dataBody').querySelectorAll('[data-delete-record]').forEach(b=>b.onclick=()=>deleteRecord(Number(b.dataset.deleteRecord)));
+}
+function editRecord(i){
+ const r=state.records[i];if(!r)return;
+ $('editRecordIndex').value=String(i);$('editRecordName').textContent=r.name;
+ $('editRecordPrice').value=r.price;$('editRecordStore').value=r.store||'';$('editRecordDate').value=r.date||today();
+ const hasWeight=r.weight!==undefined&&r.weight!==null&&r.weight!=='';
+ const hasQty=r.qty!==undefined&&r.qty!==null&&r.qty!=='';
+ $('editRecordWeightWrap').classList.toggle('hidden',!hasWeight);
+ $('editRecordQtyWrap').classList.toggle('hidden',!hasQty);
+ $('editRecordWeight').value=hasWeight?r.weight:'';$('editRecordQty').value=hasQty?r.qty:'';
+ show('editRecord');
+}
+function deleteRecord(i){
+ const r=state.records[i];if(!r)return;
+ if(!confirm(`「${r.name}」の${r.date}の価格記録（${Number(r.price).toLocaleString()}円）を削除しますか？\nこの操作は取り消せません。`))return;
+ state.records.splice(i,1);save();renderData();toast('価格記録を1件削除しました');
+}
+$('editRecordForm').addEventListener('submit',e=>{
+ e.preventDefault();const i=Number($('editRecordIndex').value),r=state.records[i];if(!r)return;
+ const price=Number($('editRecordPrice').value),store=$('editRecordStore').value.trim(),date=$('editRecordDate').value;
+ if(!Number.isFinite(price)||price<=0||!store||!date){toast('価格・店舗・日付を確認してください');return}
+ let unitPrice=price;
+ if(!$('editRecordWeightWrap').classList.contains('hidden')){
+  const w=Number($('editRecordWeight').value);if(!Number.isFinite(w)||w<=0){toast('重量を確認してください');return}
+  r.weight=w;unitPrice=price/(w/(r.unitLabel==='1kg'||r.unitLabel==='kg'?1000:100));
+ }else if(!$('editRecordQtyWrap').classList.contains('hidden')){
+  const q=Number($('editRecordQty').value);if(!Number.isFinite(q)||q<=0){toast('数量を確認してください');return}
+  r.qty=q;unitPrice=price/q;
+ }
+ r.price=price;r.unitPrice=unitPrice;r.store=store;r.date=date;
+ save();show('data');toast('価格記録を修正しました');
+});
 $('addListBtn').onclick=addListItem;$('nonJanBtn').onclick=()=>show('janless');$('dataBtn').onclick=()=>show('data');$('manualBtn').onclick=()=>{const j=prompt('商品バーコード番号を入力してください');if(j){currentJan=j.trim();lookup()}};
 $('scanBtn').onclick=()=>{show('scanner');setTimeout(startCamera,80)};
 $('stopBtn')?.addEventListener('click',()=>stopCamera());
